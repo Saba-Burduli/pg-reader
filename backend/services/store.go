@@ -87,6 +87,8 @@ func (s *Store) List() []models.ArticleSummary {
 			Title:               a.Title,
 			URL:                 a.URL,
 			PublishedAt:         a.PublishedAt,
+			PublishedDate:       a.PublishedDate,
+			PublishedPrecision:  a.PublishedPrecision,
 			PublishedDateSource: a.PublishedDateSource,
 			WordCount:           a.WordCount,
 			Description:         a.Description,

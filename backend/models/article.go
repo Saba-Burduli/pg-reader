@@ -10,6 +10,8 @@ type Article struct {
 	Content             string    `json:"content"`
 	ScrapedAt           time.Time `json:"scrapedAt"`
 	PublishedAt         time.Time `json:"publishedAt"`
+	PublishedDate       string    `json:"publishedDate"`
+	PublishedPrecision  string    `json:"publishedPrecision"`
 	PublishedDateSource string    `json:"publishedDateSource"`
 	WordCount           int       `json:"wordCount"`
 	Description         string    `json:"description"`
@@ -22,6 +24,8 @@ type ArticleSummary struct {
 	Title               string    `json:"title"`
 	URL                 string    `json:"url"`
 	PublishedAt         time.Time `json:"publishedAt"`
+	PublishedDate       string    `json:"publishedDate"`
+	PublishedPrecision  string    `json:"publishedPrecision"`
 	PublishedDateSource string    `json:"publishedDateSource"`
 	WordCount           int       `json:"wordCount"`
 	Description         string    `json:"description"`

@@ -7,8 +7,8 @@ https://frontend-eight-delta-64.vercel.app
 
 ## What It Does
 - Loads essays from Paul Graham’s official essays page
-- Keeps essay order aligned with the official listing
-- Shows publication date when available
+- Sorts essays by extracted publication date
+- Shows the official publication date when available
 - Lets readers mark essays as read/unread
 - Persists progress locally for returning sessions
 

@@ -28,7 +28,16 @@ var (
 	monthDayYearPattern = regexp.MustCompile(`(?i)\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}\b`)
 	monthYearPattern    = regexp.MustCompile(`(?i)\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\b`)
 	shortDatePattern    = regexp.MustCompile(`\b\d{1,2}/\d{1,2}/\d{2,4}\b`)
+	yearPattern         = regexp.MustCompile(`^\d{4}$`)
+	tagPattern          = regexp.MustCompile(`(?s)<[^>]+>`)
 )
+
+type publicationDate struct {
+	sortTime  time.Time
+	display   string
+	precision string
+	source    string
+}
 
 func NewScraper() *Scraper {
 	return &Scraper{
@@ -91,7 +100,7 @@ func (s *Scraper) Sync(ctx context.Context) ([]models.Article, error) {
 
 	articles := make([]models.Article, 0, len(entries))
 	for _, e := range entries {
-		content, publishedAt, source, err := s.fetchArticleContent(ctx, e.url)
+		content, published, err := s.fetchArticleContent(ctx, e.title, e.url)
 		if err != nil {
 			continue
 		}
@@ -107,8 +116,10 @@ func (s *Scraper) Sync(ctx context.Context) ([]models.Article, error) {
 			URL:                 e.url,
 			Content:             content,
 			ScrapedAt:           time.Now().UTC(),
-			PublishedAt:         publishedAt,
-			PublishedDateSource: source,
+			PublishedAt:         published.sortTime,
+			PublishedDate:       published.display,
+			PublishedPrecision:  published.precision,
+			PublishedDateSource: published.source,
 			WordCount:           countWords(content),
 			Description:         summarize(content),
 			IsRead:              false,
@@ -118,11 +129,12 @@ func (s *Scraper) Sync(ctx context.Context) ([]models.Article, error) {
 	return articles, nil
 }
 
-func (s *Scraper) fetchArticleContent(ctx context.Context, url string) (string, time.Time, string, error) {
+func (s *Scraper) fetchArticleContent(ctx context.Context, title string, url string) (string, publicationDate, error) {
 	doc, err := s.fetchDoc(ctx, url)
 	if err != nil {
-		return "", time.Time{}, "", err
+		return "", publicationDate{}, err
 	}
+	pageHTML, _ := doc.Html()
 	doc.Find("script, style, img, noscript").Remove()
 
 	var lineBuilder strings.Builder
@@ -139,8 +151,8 @@ func (s *Scraper) fetchArticleContent(ctx context.Context, url string) (string, 
 		lineText = strings.TrimSpace(doc.Find("body").Text())
 	}
 
-	publishedAt, source := inferPublishedDate(doc, lineText)
-	return lineText, publishedAt, source, nil
+	published := inferPublishedDate(doc, pageHTML, lineText, title)
+	return lineText, published, nil
 }
 
 func (s *Scraper) fetchDoc(ctx context.Context, url string) (*goquery.Document, error) {
@@ -238,7 +250,7 @@ func summarize(s string) string {
 	return strings.Join(words, " ") + "..."
 }
 
-func inferPublishedDate(doc *goquery.Document, content string) (time.Time, string) {
+func inferPublishedDate(doc *goquery.Document, pageHTML string, content string, title string) publicationDate {
 	metaKeys := []string{
 		`meta[property="article:published_time"]`,
 		`meta[name="article:published_time"]`,
@@ -249,9 +261,15 @@ func inferPublishedDate(doc *goquery.Document, content string) (time.Time, strin
 	for _, key := range metaKeys {
 		if val, ok := doc.Find(key).Attr("content"); ok {
 			if parsed, ok := parseDateCandidate(val); ok {
-				return parsed, "meta"
+				parsed.source = "meta"
+				return parsed
 			}
 		}
+	}
+
+	if parsed, ok := parseTopOfArticleDate(pageHTML, title); ok {
+		parsed.source = "page_text"
+		return parsed
 	}
 
 	lines := strings.Split(content, "\n")
@@ -261,28 +279,85 @@ func inferPublishedDate(doc *goquery.Document, content string) (time.Time, strin
 			continue
 		}
 		if parsed, ok := parseDateCandidate(line); ok {
-			return parsed, "page_text"
+			parsed.source = "page_text"
+			return parsed
 		}
 		if len(line) > 80 {
 			continue
 		}
 		if match := monthDayYearPattern.FindString(line); match != "" {
 			if parsed, ok := parseDateCandidate(match); ok {
-				return parsed, "page_text"
+				parsed.source = "page_text"
+				return parsed
 			}
 		}
 		if match := monthYearPattern.FindString(line); match != "" {
 			if parsed, ok := parseDateCandidate(match); ok {
-				return parsed, "page_text"
+				parsed.source = "page_text"
+				return parsed
 			}
 		}
 	}
 
-	return time.Time{}, "unknown"
+	return publicationDate{source: "unknown"}
 }
 
-func parseDateCandidate(raw string) (time.Time, bool) {
+func parseTopOfArticleDate(pageHTML string, title string) (publicationDate, bool) {
+	if title != "" {
+		needle := `alt="` + title + `"`
+		if idx := strings.Index(pageHTML, needle); idx >= 0 {
+			end := idx + 5000
+			if end > len(pageHTML) {
+				end = len(pageHTML)
+			}
+			pageHTML = pageHTML[idx:end]
+		} else {
+			contentIdx := strings.Index(pageHTML, `width="435"`)
+			if contentIdx < 0 {
+				return publicationDate{}, false
+			}
+			altIdx := strings.Index(pageHTML[contentIdx:], `alt="`)
+			if altIdx < 0 {
+				return publicationDate{}, false
+			}
+			start := contentIdx + altIdx
+			end := start + 5000
+			if end > len(pageHTML) {
+				end = len(pageHTML)
+			}
+			pageHTML = pageHTML[start:end]
+		}
+	}
+	pageHTML = strings.ReplaceAll(pageHTML, "<br>", "\n")
+	pageHTML = strings.ReplaceAll(pageHTML, "<br/>", "\n")
+	pageHTML = strings.ReplaceAll(pageHTML, "<br />", "\n")
+	pageHTML = strings.ReplaceAll(pageHTML, "<p>", "\n")
+	pageHTML = strings.ReplaceAll(pageHTML, "<p align=justif>", "\n")
+	pageHTML = strings.ReplaceAll(pageHTML, "</p>", "\n")
+	text := tagPattern.ReplaceAllString(pageHTML, "\n")
+
+	lines := strings.Split(text, "\n")
+	for _, raw := range lines {
+		line := normalizeText(raw)
+		if line == "" || len(line) > 90 {
+			continue
+		}
+		if parsed, ok := parseDateCandidate(line); ok {
+			return parsed, true
+		}
+	}
+
+	return publicationDate{}, false
+}
+
+func parseDateCandidate(raw string) (publicationDate, bool) {
 	raw = strings.TrimSpace(raw)
+	if commaIdx := strings.Index(strings.ToLower(raw), ", rev."); commaIdx > 0 {
+		raw = raw[:commaIdx]
+	}
+	if commaIdx := strings.Index(strings.ToLower(raw), ", revised"); commaIdx > 0 {
+		raw = raw[:commaIdx]
+	}
 	layouts := []string{
 		time.RFC3339,
 		"2006-01-02",
@@ -296,30 +371,42 @@ func parseDateCandidate(raw string) (time.Time, bool) {
 	for _, layout := range layouts {
 		t, err := time.Parse(layout, raw)
 		if err == nil && t.Year() >= 1990 && t.Year() <= time.Now().UTC().Year()+1 {
+			precision := "day"
+			display := t.Format("2006-01-02")
 			if layout == "January 2006" || layout == "Jan 2006" {
 				t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+				precision = "month"
+				display = t.Format("2006-01")
 			}
-			return t.UTC(), true
+			return publicationDate{sortTime: t.UTC(), display: display, precision: precision}, true
 		}
 	}
 
 	if match := monthDayYearPattern.FindString(raw); match != "" {
 		if t, err := time.Parse("January 2, 2006", match); err == nil {
-			return t.UTC(), true
+			return publicationDate{sortTime: t.UTC(), display: t.Format("2006-01-02"), precision: "day"}, true
 		}
 	}
 	if match := monthYearPattern.FindString(raw); match != "" {
 		if t, err := time.Parse("January 2006", match); err == nil {
-			return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC), true
+			t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+			return publicationDate{sortTime: t, display: t.Format("2006-01"), precision: "month"}, true
 		}
 	}
 	if match := shortDatePattern.FindString(raw); match != "" {
 		for _, layout := range []string{"1/2/2006", "1/2/06"} {
 			if t, err := time.Parse(layout, match); err == nil {
-				return t.UTC(), true
+				return publicationDate{sortTime: t.UTC(), display: t.Format("2006-01-02"), precision: "day"}, true
 			}
 		}
 	}
+	if yearPattern.MatchString(raw) {
+		year := 0
+		if _, err := fmt.Sscanf(raw, "%d", &year); err == nil && year >= 1990 && year <= time.Now().UTC().Year()+1 {
+			t := time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
+			return publicationDate{sortTime: t, display: raw, precision: "year"}, true
+		}
+	}
 
-	return time.Time{}, false
+	return publicationDate{}, false
 }

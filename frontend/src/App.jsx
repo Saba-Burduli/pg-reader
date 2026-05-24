@@ -18,6 +18,7 @@ export default function App() {
   const [loadingArticle, setLoadingArticle] = useState(false)
   const [error, setError] = useState('')
   const [pendingRead, setPendingRead] = useState({})
+  const [sortDirection, setSortDirection] = useState('desc')
 
   useEffect(() => {
     let canceled = false
@@ -72,7 +73,7 @@ export default function App() {
     return { total, read, remaining, percent }
   }, [articles])
 
-  const orderedEssays = useMemo(() => sortByOfficialOrder(articles), [articles])
+  const orderedEssays = useMemo(() => sortByPublicationDate(articles, sortDirection), [articles, sortDirection])
 
   async function handleToggleRead(essayID, nextRead, silent = false) {
     const prevRead = getEssayReadState(essayID)
@@ -138,7 +139,12 @@ export default function App() {
         {error ? <p className="error">{error}</p> : null}
 
         <section className="group">
-          <h3>Essays</h3>
+          <div className="group-header">
+            <h3>Essays</h3>
+            <button className="sort-toggle" onClick={() => setSortDirection((value) => (value === 'desc' ? 'asc' : 'desc'))}>
+              {sortDirection === 'desc' ? 'Newest first' : 'Oldest first'}
+            </button>
+          </div>
           <div className="library-scroll">
             <nav className="list">
               {orderedEssays.map((essay) => (
@@ -167,7 +173,7 @@ export default function App() {
           <article>
             <h2>{article.title}</h2>
             <p className="meta">
-              {formatDate(article.publishedAt)} · {article.wordCount} words · {article.isRead ? 'Read' : 'Unread'}
+              {formatDate(article.publishedDate || article.publishedAt)} · {article.wordCount} words · {article.isRead ? 'Read' : 'Unread'}
             </p>
             <button
               className={article.isRead ? 'toggle-main read' : 'toggle-main'}
@@ -198,7 +204,7 @@ function EssayRow({ essay, activeId, pending, onToggleRead }) {
     <div className={`item ${essay.id === activeId ? 'active' : ''} ${essay.isRead ? 'done' : ''}`}>
       <Link className="item-link" to={`/article/${essay.id}`}>
         <div className="item-title">{essay.title}</div>
-        <small>{formatDate(essay.publishedAt)}</small>
+        <small>{formatDate(essay.publishedDate || essay.publishedAt)}</small>
       </Link>
       <div className="item-actions">
         <span className={essay.isRead ? 'status-indicator read' : 'status-indicator unread'}>
@@ -217,8 +223,9 @@ function EssayRow({ essay, activeId, pending, onToggleRead }) {
 }
 
 function formatDate(raw) {
+  if (typeof raw === 'string' && /^\d{4}(-\d{2}){0,2}$/.test(raw)) return raw
   const date = new Date(raw)
-  if (Number.isNaN(date.getTime())) return 'Unknown date'
+  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1) return 'Unknown date'
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
     month: 'short',
@@ -230,7 +237,7 @@ async function getArticles() {
   if (!USE_STATIC_MODE) {
     try {
       const res = await fetch(`${API_BASE}/articles`)
-      if (res.ok) return sortByOfficialOrder(await res.json())
+      if (res.ok) return sortByPublicationDate(await res.json(), 'desc')
     } catch {
       // Fallback to static mode when backend is unavailable.
     }
@@ -239,7 +246,7 @@ async function getArticles() {
   if (!res.ok) throw new Error('Failed to load essays')
   const articles = await res.json()
   const readMap = loadReadState()
-  return sortByOfficialOrder(articles.map((a) => ({ ...a, isRead: Boolean(readMap[a.id]) })))
+  return sortByPublicationDate(articles.map((a) => ({ ...a, isRead: Boolean(readMap[a.id]) })), 'desc')
 }
 
 async function getArticleByID(id) {
@@ -285,13 +292,25 @@ function loadReadState() {
   }
 }
 
-function sortByOfficialOrder(articles) {
+function sortByPublicationDate(articles, direction) {
   const copy = [...articles]
   copy.sort((a, b) => {
-    const aOrder = Number.isFinite(a.listOrder) ? a.listOrder : Number.MAX_SAFE_INTEGER
-    const bOrder = Number.isFinite(b.listOrder) ? b.listOrder : Number.MAX_SAFE_INTEGER
-    if (aOrder !== bOrder) return aOrder - bOrder
+    const aTime = sortableTime(a.publishedAt)
+    const bTime = sortableTime(b.publishedAt)
+    const aUnknown = aTime === null
+    const bUnknown = bTime === null
+    if (aUnknown && !bUnknown) return 1
+    if (!aUnknown && bUnknown) return -1
+    if (!aUnknown && !bUnknown && aTime !== bTime) {
+      return direction === 'asc' ? aTime - bTime : bTime - aTime
+    }
     return String(a.title).localeCompare(String(b.title))
   })
   return copy
+}
+
+function sortableTime(raw) {
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1) return null
+  return date.getTime()
 }
