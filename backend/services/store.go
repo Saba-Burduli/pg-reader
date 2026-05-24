@@ -83,6 +83,7 @@ func (s *Store) List() []models.ArticleSummary {
 	for _, a := range s.articles {
 		out = append(out, models.ArticleSummary{
 			ID:                  a.ID,
+			ListOrder:           a.ListOrder,
 			Title:               a.Title,
 			URL:                 a.URL,
 			PublishedAt:         a.PublishedAt,

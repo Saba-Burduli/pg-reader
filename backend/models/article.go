@@ -4,6 +4,7 @@ import "time"
 
 type Article struct {
 	ID                  string    `json:"id"`
+	ListOrder           int       `json:"listOrder"`
 	Title               string    `json:"title"`
 	URL                 string    `json:"url"`
 	Content             string    `json:"content"`
@@ -17,6 +18,7 @@ type Article struct {
 
 type ArticleSummary struct {
 	ID                  string    `json:"id"`
+	ListOrder           int       `json:"listOrder"`
 	Title               string    `json:"title"`
 	URL                 string    `json:"url"`
 	PublishedAt         time.Time `json:"publishedAt"`

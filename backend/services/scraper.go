@@ -47,33 +47,46 @@ func (s *Scraper) Sync(ctx context.Context) ([]models.Article, error) {
 	}
 
 	type entry struct {
+		order int
 		title string
 		url   string
 	}
 	entries := make([]entry, 0, 200)
 	seen := map[string]struct{}{}
+	started := false
 
 	doc.Find("a").Each(func(_ int, sel *goquery.Selection) {
 		href, ok := sel.Attr("href")
 		if !ok {
 			return
 		}
+		hrefLower := strings.ToLower(strings.TrimSpace(href))
+		if strings.HasSuffix(hrefLower, "winc.html") {
+			started = true
+		}
+		if !started {
+			return
+		}
 		title := strings.TrimSpace(sel.Text())
 		if title == "" {
 			return
 		}
-		if !strings.HasSuffix(strings.ToLower(href), ".html") {
+		isChapter := strings.Contains(strings.ToLower(title), "chapter ")
+		if !strings.HasSuffix(hrefLower, ".html") && !isChapter {
 			return
 		}
-		if strings.Contains(strings.ToLower(href), "index") || strings.Contains(strings.ToLower(href), "rss") {
+		if strings.Contains(hrefLower, "index") || strings.Contains(hrefLower, "rss") {
 			return
 		}
-		url := "https://www.paulgraham.com/" + strings.TrimPrefix(href, "/")
+		url := href
+		if !strings.HasPrefix(strings.ToLower(url), "http://") && !strings.HasPrefix(strings.ToLower(url), "https://") {
+			url = "https://www.paulgraham.com/" + strings.TrimPrefix(href, "/")
+		}
 		if _, ok := seen[url]; ok {
 			return
 		}
 		seen[url] = struct{}{}
-		entries = append(entries, entry{title: title, url: url})
+		entries = append(entries, entry{order: len(entries), title: title, url: url})
 	})
 
 	articles := make([]models.Article, 0, len(entries))
@@ -89,6 +102,7 @@ func (s *Scraper) Sync(ctx context.Context) ([]models.Article, error) {
 		id := slugify(e.title)
 		articles = append(articles, models.Article{
 			ID:                  id,
+			ListOrder:           e.order,
 			Title:               e.title,
 			URL:                 e.url,
 			Content:             content,
