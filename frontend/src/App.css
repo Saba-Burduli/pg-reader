@@ -66,7 +66,6 @@
 .item {
   display: flex;
   flex-direction: column;
-  text-decoration: none;
   color: #d9d9d9;
   border: 1px solid #1d1d1d;
   border-radius: 6px;
@@ -89,6 +88,51 @@
 .item small {
   color: #898989;
   margin-top: 0.3rem;
+}
+
+.item-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.item-actions {
+  margin-top: 0.45rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.status-indicator {
+  font-size: 0.75rem;
+  border: 1px solid #2c2c2c;
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+}
+
+.status-indicator.read {
+  color: #b0b0b0;
+}
+
+.status-indicator.unread {
+  color: #e6e6e6;
+}
+
+.toggle-inline,
+.toggle-main {
+  border: 1px solid #2a2a2a;
+  background: #111;
+  color: #e2e2e2;
+  border-radius: 6px;
+  padding: 0.3rem 0.52rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.toggle-inline:disabled,
+.toggle-main:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .reader {
@@ -115,6 +159,10 @@
   line-height: 1.9;
   white-space: pre-wrap;
   color: #ececec;
+}
+
+.toggle-main {
+  margin-bottom: 1rem;
 }
 
 .back {

@@ -17,6 +17,7 @@ export default function App() {
   const [loadingList, setLoadingList] = useState(true)
   const [loadingArticle, setLoadingArticle] = useState(false)
   const [error, setError] = useState('')
+  const [pendingRead, setPendingRead] = useState({})
 
   useEffect(() => {
     let canceled = false
@@ -54,17 +55,14 @@ export default function App() {
     const onScroll = () => {
       const reachedBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 24
       if (!reachedBottom) return
-      setReadStatus(article.id, true)
-        .then((updated) => {
-          setArticle(updated)
-          setArticles((prev) => prev.map((item) => (item.id === updated.id ? { ...item, isRead: true } : item)))
-        })
-        .catch(() => {})
+      if (!pendingRead[article.id]) {
+        handleToggleRead(article.id, true, true)
+      }
     }
 
     node.addEventListener('scroll', onScroll, { passive: true })
     return () => node.removeEventListener('scroll', onScroll)
-  }, [article])
+  }, [article, pendingRead])
 
   const stats = useMemo(() => {
     const total = articles.length
@@ -76,6 +74,39 @@ export default function App() {
 
   const unreadEssays = useMemo(() => articles.filter((a) => !a.isRead), [articles])
   const completedEssays = useMemo(() => articles.filter((a) => a.isRead), [articles])
+
+  async function handleToggleRead(essayID, nextRead, silent = false) {
+    const prevRead = getEssayReadState(essayID)
+    applyReadState(essayID, nextRead)
+    setPendingRead((prev) => ({ ...prev, [essayID]: true }))
+
+    try {
+      const updated = await setReadStatus(essayID, nextRead)
+      applyReadState(essayID, updated.isRead)
+      if (!silent) setError('')
+    } catch (err) {
+      applyReadState(essayID, prevRead)
+      if (!silent) setError(err.message || 'Failed to update read status')
+    } finally {
+      setPendingRead((prev) => {
+        const next = { ...prev }
+        delete next[essayID]
+        return next
+      })
+    }
+  }
+
+  function applyReadState(essayID, isRead) {
+    setArticles((prev) => prev.map((item) => (item.id === essayID ? { ...item, isRead } : item)))
+    setArticle((prev) => (prev && prev.id === essayID ? { ...prev, isRead } : prev))
+  }
+
+  function getEssayReadState(essayID) {
+    const fromList = articles.find((item) => item.id === essayID)
+    if (fromList) return Boolean(fromList.isRead)
+    if (article && article.id === essayID) return Boolean(article.isRead)
+    return false
+  }
 
   return (
     <div className="app">
@@ -111,7 +142,13 @@ export default function App() {
           <h3>Unread</h3>
           <nav className="list">
             {unreadEssays.map((essay) => (
-              <EssayRow key={essay.id} essay={essay} activeId={id} />
+              <EssayRow
+                key={essay.id}
+                essay={essay}
+                activeId={id}
+                pending={Boolean(pendingRead[essay.id])}
+                onToggleRead={handleToggleRead}
+              />
             ))}
           </nav>
         </section>
@@ -120,7 +157,13 @@ export default function App() {
           <h3>Completed</h3>
           <nav className="list">
             {completedEssays.map((essay) => (
-              <EssayRow key={essay.id} essay={essay} activeId={id} />
+              <EssayRow
+                key={essay.id}
+                essay={essay}
+                activeId={id}
+                pending={Boolean(pendingRead[essay.id])}
+                onToggleRead={handleToggleRead}
+              />
             ))}
           </nav>
         </section>
@@ -140,6 +183,17 @@ export default function App() {
             <p className="meta">
               {formatDate(article.publishedAt)} · {article.wordCount} words · {article.isRead ? 'Read' : 'Unread'}
             </p>
+            <button
+              className="toggle-main"
+              onClick={() => handleToggleRead(article.id, !article.isRead)}
+              disabled={Boolean(pendingRead[article.id])}
+            >
+              {pendingRead[article.id]
+                ? 'Saving...'
+                : article.isRead
+                  ? 'Mark as Unread'
+                  : 'Mark as Read'}
+            </button>
             <div className="content">{article.content}</div>
           </article>
         ) : (
@@ -153,12 +207,26 @@ export default function App() {
   )
 }
 
-function EssayRow({ essay, activeId }) {
+function EssayRow({ essay, activeId, pending, onToggleRead }) {
   return (
-    <Link className={`item ${essay.id === activeId ? 'active' : ''} ${essay.isRead ? 'done' : ''}`} to={`/article/${essay.id}`}>
-      <div className="item-title">{essay.isRead ? '✓ ' : '○ '}{essay.title}</div>
-      <small>{formatDate(essay.publishedAt)} · {essay.wordCount} words</small>
-    </Link>
+    <div className={`item ${essay.id === activeId ? 'active' : ''} ${essay.isRead ? 'done' : ''}`}>
+      <Link className="item-link" to={`/article/${essay.id}`}>
+        <div className="item-title">{essay.isRead ? '✓ ' : '○ '}{essay.title}</div>
+        <small>{formatDate(essay.publishedAt)} · {essay.wordCount} words</small>
+      </Link>
+      <div className="item-actions">
+        <span className={essay.isRead ? 'status-indicator read' : 'status-indicator unread'}>
+          {essay.isRead ? 'Read' : 'Unread'}
+        </span>
+        <button
+          className="toggle-inline"
+          onClick={() => onToggleRead(essay.id, !essay.isRead)}
+          disabled={pending}
+        >
+          {pending ? 'Saving...' : essay.isRead ? 'Mark as Unread' : 'Mark as Read'}
+        </button>
+      </div>
+    </div>
   )
 }
 
