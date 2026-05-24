@@ -72,8 +72,7 @@ export default function App() {
     return { total, read, remaining, percent }
   }, [articles])
 
-  const unreadEssays = useMemo(() => articles.filter((a) => !a.isRead), [articles])
-  const completedEssays = useMemo(() => articles.filter((a) => a.isRead), [articles])
+  const orderedEssays = useMemo(() => sortByOfficialOrder(articles), [articles])
 
   async function handleToggleRead(essayID, nextRead, silent = false) {
     const prevRead = getEssayReadState(essayID)
@@ -139,33 +138,20 @@ export default function App() {
         {error ? <p className="error">{error}</p> : null}
 
         <section className="group">
-          <h3>Unread</h3>
-          <nav className="list">
-            {unreadEssays.map((essay) => (
-              <EssayRow
-                key={essay.id}
-                essay={essay}
-                activeId={id}
-                pending={Boolean(pendingRead[essay.id])}
-                onToggleRead={handleToggleRead}
-              />
-            ))}
-          </nav>
-        </section>
-
-        <section className="group">
-          <h3>Completed</h3>
-          <nav className="list">
-            {completedEssays.map((essay) => (
-              <EssayRow
-                key={essay.id}
-                essay={essay}
-                activeId={id}
-                pending={Boolean(pendingRead[essay.id])}
-                onToggleRead={handleToggleRead}
-              />
-            ))}
-          </nav>
+          <h3>Essays</h3>
+          <div className="library-scroll">
+            <nav className="list">
+              {orderedEssays.map((essay) => (
+                <EssayRow
+                  key={essay.id}
+                  essay={essay}
+                  activeId={id}
+                  pending={Boolean(pendingRead[essay.id])}
+                  onToggleRead={handleToggleRead}
+                />
+              ))}
+            </nav>
+          </div>
         </section>
       </aside>
 
@@ -184,7 +170,7 @@ export default function App() {
               {formatDate(article.publishedAt)} · {article.wordCount} words · {article.isRead ? 'Read' : 'Unread'}
             </p>
             <button
-              className="toggle-main"
+              className={article.isRead ? 'toggle-main read' : 'toggle-main'}
               onClick={() => handleToggleRead(article.id, !article.isRead)}
               disabled={Boolean(pendingRead[article.id])}
             >
@@ -211,8 +197,8 @@ function EssayRow({ essay, activeId, pending, onToggleRead }) {
   return (
     <div className={`item ${essay.id === activeId ? 'active' : ''} ${essay.isRead ? 'done' : ''}`}>
       <Link className="item-link" to={`/article/${essay.id}`}>
-        <div className="item-title">{essay.isRead ? '✓ ' : '○ '}{essay.title}</div>
-        <small>{formatDate(essay.publishedAt)} · {essay.wordCount} words</small>
+        <div className="item-title">{essay.title}</div>
+        <small>{formatDate(essay.publishedAt)}</small>
       </Link>
       <div className="item-actions">
         <span className={essay.isRead ? 'status-indicator read' : 'status-indicator unread'}>
@@ -244,7 +230,7 @@ async function getArticles() {
   if (!USE_STATIC_MODE) {
     try {
       const res = await fetch(`${API_BASE}/articles`)
-      if (res.ok) return res.json()
+      if (res.ok) return sortByOfficialOrder(await res.json())
     } catch {
       // Fallback to static mode when backend is unavailable.
     }
@@ -253,7 +239,7 @@ async function getArticles() {
   if (!res.ok) throw new Error('Failed to load essays')
   const articles = await res.json()
   const readMap = loadReadState()
-  return articles.map((a) => ({ ...a, isRead: Boolean(readMap[a.id]) }))
+  return sortByOfficialOrder(articles.map((a) => ({ ...a, isRead: Boolean(readMap[a.id]) })))
 }
 
 async function getArticleByID(id) {
@@ -297,4 +283,15 @@ function loadReadState() {
   } catch {
     return {}
   }
+}
+
+function sortByOfficialOrder(articles) {
+  const copy = [...articles]
+  copy.sort((a, b) => {
+    const aOrder = Number.isFinite(a.listOrder) ? a.listOrder : Number.MAX_SAFE_INTEGER
+    const bOrder = Number.isFinite(b.listOrder) ? b.listOrder : Number.MAX_SAFE_INTEGER
+    if (aOrder !== bOrder) return aOrder - bOrder
+    return String(a.title).localeCompare(String(b.title))
+  })
+  return copy
 }
