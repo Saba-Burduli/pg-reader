@@ -2,6 +2,10 @@
 
 Minimal, dark-mode reading library for Paul Graham essays with local progress tracking.
 
+## Live Demo
+- https://frontend-eight-delta-64.vercel.app
+- Latest production deploy: `dpl_88b3deVeU8xZzVevhZZZ6bLGKfHG` (May 25, 2026)
+
 GitHub: https://github.com/Saba-Burduli/pg-reader
 
 ## Features
