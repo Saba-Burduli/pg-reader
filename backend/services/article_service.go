@@ -19,16 +19,20 @@ func NewArticleService(store *Store, scraper *Scraper) *ArticleService {
 }
 
 func (s *ArticleService) EnsureSynced(ctx context.Context) error {
-	if !s.store.Empty() {
+	if !s.store.NeedsMetadataRefresh() {
 		return nil
 	}
 	return s.Sync(ctx)
 }
 
 func (s *ArticleService) Sync(ctx context.Context) error {
+	readState := s.store.ReadStateMap()
 	articles, err := s.scraper.Sync(ctx)
 	if err != nil {
 		return err
+	}
+	for i := range articles {
+		articles[i].IsRead = readState[articles[i].ID]
 	}
 	return s.store.SaveAll(articles)
 }
@@ -39,6 +43,17 @@ func (s *ArticleService) List() []models.ArticleSummary {
 
 func (s *ArticleService) Get(id string) (models.Article, error) {
 	article, ok := s.store.Get(id)
+	if !ok {
+		return models.Article{}, ErrNotFound
+	}
+	return article, nil
+}
+
+func (s *ArticleService) SetRead(id string, isRead bool) (models.Article, error) {
+	article, ok, err := s.store.SetRead(id, isRead)
+	if err != nil {
+		return models.Article{}, err
+	}
 	if !ok {
 		return models.Article{}, ErrNotFound
 	}
