@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -22,6 +23,11 @@ type Scraper struct {
 	rateLimiter <-chan time.Time
 	retries     int
 }
+
+var (
+	longDatePattern  = regexp.MustCompile(`(?i)\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}\b`)
+	shortDatePattern = regexp.MustCompile(`\b\d{1,2}/\d{1,2}/\d{2,4}\b`)
+)
 
 func NewScraper() *Scraper {
 	return &Scraper{
@@ -70,8 +76,8 @@ func (s *Scraper) Sync(ctx context.Context) ([]models.Article, error) {
 	})
 
 	articles := make([]models.Article, 0, len(entries))
-	for _, e := range entries {
-		content, err := s.fetchArticleContent(ctx, e.url)
+	for idx, e := range entries {
+		content, publishedAt, source, err := s.fetchArticleContent(ctx, e.url, idx)
 		if err != nil {
 			continue
 		}
@@ -81,28 +87,32 @@ func (s *Scraper) Sync(ctx context.Context) ([]models.Article, error) {
 		}
 		id := slugify(e.title)
 		articles = append(articles, models.Article{
-			ID:          id,
-			Title:       e.title,
-			URL:         e.url,
-			Content:     content,
-			ScrapedAt:   time.Now().UTC(),
-			WordCount:   countWords(content),
-			Description: summarize(content),
+			ID:                  id,
+			Title:               e.title,
+			URL:                 e.url,
+			Content:             content,
+			ScrapedAt:           time.Now().UTC(),
+			PublishedAt:         publishedAt,
+			PublishedDateSource: source,
+			WordCount:           countWords(content),
+			Description:         summarize(content),
+			IsRead:              false,
 		})
 	}
 
 	return articles, nil
 }
 
-func (s *Scraper) fetchArticleContent(ctx context.Context, url string) (string, error) {
+func (s *Scraper) fetchArticleContent(ctx context.Context, url string, sequence int) (string, time.Time, string, error) {
 	doc, err := s.fetchDoc(ctx, url)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, "", err
 	}
 	doc.Find("script, style, img, noscript").Remove()
 
 	body := strings.TrimSpace(doc.Find("body").Text())
-	return body, nil
+	publishedAt, source := inferPublishedDate(body, sequence)
+	return body, publishedAt, source, nil
 }
 
 func (s *Scraper) fetchDoc(ctx context.Context, url string) (*goquery.Document, error) {
@@ -198,4 +208,25 @@ func summarize(s string) string {
 		words = words[:28]
 	}
 	return strings.Join(words, " ") + "..."
+}
+
+func inferPublishedDate(content string, sequence int) (time.Time, string) {
+	if match := longDatePattern.FindString(content); match != "" {
+		if parsed, err := time.Parse("January 2, 2006", match); err == nil {
+			return parsed.UTC(), "extracted"
+		}
+	}
+
+	if match := shortDatePattern.FindString(content); match != "" {
+		layouts := []string{"1/2/2006", "1/2/06"}
+		for _, layout := range layouts {
+			if parsed, err := time.Parse(layout, match); err == nil {
+				return parsed.UTC(), "extracted"
+			}
+		}
+	}
+
+	// Fallback inference: preserve the source listing order.
+	base := time.Date(2001, time.January, 1, 0, 0, 0, 0, time.UTC)
+	return base.AddDate(0, 0, sequence), "inferred"
 }
