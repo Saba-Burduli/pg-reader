@@ -64,11 +64,12 @@ Runs on `http://127.0.0.1:5173`.
 Read state is stored in backend cache JSON (`IsRead` field per essay).  
 This keeps progress lightweight and local-first without authentication.
 
-## Deployment
-- Frontend (Vercel): https://frontend-eight-delta-64.vercel.app
-- Backend target: Railway (Docker deploy from `backend/Dockerfile`)
+## Deployment (Free)
+- Public app: https://frontend-eight-delta-64.vercel.app
+- Host: Vercel Free tier
+- Mode: static data (`frontend/public/articles.json`) + browser localStorage for read progress
 
-Backend deployment is prepared but Railway login must be completed in this environment before the public API URL can be attached to frontend production env (`VITE_API_BASE_URL`).
+This deployment is fully free and does not require a paid backend service.
 
 ## Verification Commands
 ```bash

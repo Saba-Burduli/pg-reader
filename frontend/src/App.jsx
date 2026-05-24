@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import './App.css'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'
+const USE_STATIC_MODE = import.meta.env.VITE_USE_STATIC_DATA === 'true' || !import.meta.env.VITE_API_BASE_URL
+const READ_STATE_KEY = 'pg-reader-read-state-v1'
 
 export default function App() {
   const { id } = useParams()
@@ -19,11 +21,7 @@ export default function App() {
   useEffect(() => {
     let canceled = false
     setLoadingList(true)
-    fetch(`${API_BASE}/articles`)
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to load essays')
-        return res.json()
-      })
+    getArticles()
       .then((data) => !canceled && setArticles(data))
       .catch((err) => !canceled && setError(err.message))
       .finally(() => !canceled && setLoadingList(false))
@@ -40,11 +38,7 @@ export default function App() {
     }
     let canceled = false
     setLoadingArticle(true)
-    fetch(`${API_BASE}/articles/${id}`)
-      .then((res) => {
-        if (!res.ok) throw new Error('Essay not found')
-        return res.json()
-      })
+    getArticleByID(id)
       .then((data) => !canceled && setArticle(data))
       .catch((err) => !canceled && setError(err.message))
       .finally(() => !canceled && setLoadingArticle(false))
@@ -60,15 +54,7 @@ export default function App() {
     const onScroll = () => {
       const reachedBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 24
       if (!reachedBottom) return
-      fetch(`${API_BASE}/articles/${article.id}/read`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isRead: true }),
-      })
-        .then((res) => {
-          if (!res.ok) throw new Error('Failed to update read status')
-          return res.json()
-        })
+      setReadStatus(article.id, true)
         .then((updated) => {
           setArticle(updated)
           setArticles((prev) => prev.map((item) => (item.id === updated.id ? { ...item, isRead: true } : item)))
@@ -184,4 +170,54 @@ function formatDate(raw) {
     month: 'short',
     day: '2-digit',
   }).format(date)
+}
+
+async function getArticles() {
+  if (!USE_STATIC_MODE) {
+    const res = await fetch(`${API_BASE}/articles`)
+    if (!res.ok) throw new Error('Failed to load essays')
+    return res.json()
+  }
+  const res = await fetch('/articles.json')
+  if (!res.ok) throw new Error('Failed to load essays')
+  const articles = await res.json()
+  const readMap = loadReadState()
+  return articles.map((a) => ({ ...a, isRead: Boolean(readMap[a.id]) }))
+}
+
+async function getArticleByID(id) {
+  if (!USE_STATIC_MODE) {
+    const res = await fetch(`${API_BASE}/articles/${id}`)
+    if (!res.ok) throw new Error('Essay not found')
+    return res.json()
+  }
+  const articles = await getArticles()
+  const article = articles.find((a) => a.id === id)
+  if (!article) throw new Error('Essay not found')
+  return article
+}
+
+async function setReadStatus(id, isRead) {
+  if (!USE_STATIC_MODE) {
+    const res = await fetch(`${API_BASE}/articles/${id}/read`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isRead }),
+    })
+    if (!res.ok) throw new Error('Failed to update read status')
+    return res.json()
+  }
+  const readMap = loadReadState()
+  readMap[id] = isRead
+  localStorage.setItem(READ_STATE_KEY, JSON.stringify(readMap))
+  const article = await getArticleByID(id)
+  return { ...article, isRead }
+}
+
+function loadReadState() {
+  try {
+    return JSON.parse(localStorage.getItem(READ_STATE_KEY) || '{}')
+  } catch {
+    return {}
+  }
 }
