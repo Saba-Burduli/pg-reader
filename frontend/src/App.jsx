@@ -242,9 +242,12 @@ function formatDate(raw) {
 
 async function getArticles() {
   if (!USE_STATIC_MODE) {
-    const res = await fetch(`${API_BASE}/articles`)
-    if (!res.ok) throw new Error('Failed to load essays')
-    return res.json()
+    try {
+      const res = await fetch(`${API_BASE}/articles`)
+      if (res.ok) return res.json()
+    } catch {
+      // Fallback to static mode when backend is unavailable.
+    }
   }
   const res = await fetch('/articles.json')
   if (!res.ok) throw new Error('Failed to load essays')
@@ -255,9 +258,12 @@ async function getArticles() {
 
 async function getArticleByID(id) {
   if (!USE_STATIC_MODE) {
-    const res = await fetch(`${API_BASE}/articles/${id}`)
-    if (!res.ok) throw new Error('Essay not found')
-    return res.json()
+    try {
+      const res = await fetch(`${API_BASE}/articles/${id}`)
+      if (res.ok) return res.json()
+    } catch {
+      // Fallback to static mode when backend is unavailable.
+    }
   }
   const articles = await getArticles()
   const article = articles.find((a) => a.id === id)
@@ -267,13 +273,16 @@ async function getArticleByID(id) {
 
 async function setReadStatus(id, isRead) {
   if (!USE_STATIC_MODE) {
-    const res = await fetch(`${API_BASE}/articles/${id}/read`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isRead }),
-    })
-    if (!res.ok) throw new Error('Failed to update read status')
-    return res.json()
+    try {
+      const res = await fetch(`${API_BASE}/articles/${id}/read`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isRead }),
+      })
+      if (res.ok) return res.json()
+    } catch {
+      // Fallback to local storage when backend is unavailable.
+    }
   }
   const readMap = loadReadState()
   readMap[id] = isRead
