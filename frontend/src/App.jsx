@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import './App.css'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'
-const USE_STATIC_MODE = import.meta.env.VITE_USE_STATIC_DATA === 'true' || !import.meta.env.VITE_API_BASE_URL
+const USE_STATIC_MODE = import.meta.env.VITE_USE_STATIC_DATA === 'true'
 const READ_STATE_KEY = 'pg-reader-read-state-v1'
 
 export default function App() {

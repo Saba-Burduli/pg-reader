@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"pgreader/models"
 )
@@ -60,7 +61,7 @@ func (s *Store) SaveAll(articles []models.Article) error {
 	defer s.mu.Unlock()
 
 	sort.Slice(articles, func(i, j int) bool {
-		return articles[i].PublishedAt.After(articles[j].PublishedAt)
+		return newerFirst(articles[i].PublishedAt, articles[j].PublishedAt, articles[i].Title, articles[j].Title)
 	})
 	if err := s.persistLocked(articles); err != nil {
 		return err
@@ -93,7 +94,7 @@ func (s *Store) List() []models.ArticleSummary {
 	}
 
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].PublishedAt.After(out[j].PublishedAt)
+		return newerFirst(out[i].PublishedAt, out[j].PublishedAt, out[i].Title, out[j].Title)
 	})
 
 	return out
@@ -120,7 +121,7 @@ func (s *Store) NeedsMetadataRefresh() bool {
 		return true
 	}
 	for _, article := range s.articles {
-		if article.PublishedAt.IsZero() {
+		if article.PublishedDateSource == "inferred" {
 			return true
 		}
 	}
@@ -155,7 +156,7 @@ func (s *Store) SetRead(id string, isRead bool) (models.Article, bool, error) {
 	}
 
 	sort.Slice(articles, func(i, j int) bool {
-		return articles[i].PublishedAt.After(articles[j].PublishedAt)
+		return newerFirst(articles[i].PublishedAt, articles[j].PublishedAt, articles[i].Title, articles[j].Title)
 	})
 
 	if err := s.persistLocked(articles); err != nil {
@@ -179,4 +180,19 @@ func (s *Store) persistLocked(articles []models.Article) error {
 		return err
 	}
 	return nil
+}
+
+func newerFirst(a, b time.Time, aTitle, bTitle string) bool {
+	aZero := a.IsZero()
+	bZero := b.IsZero()
+	if aZero && !bZero {
+		return false
+	}
+	if !aZero && bZero {
+		return true
+	}
+	if a.Equal(b) {
+		return aTitle < bTitle
+	}
+	return a.After(b)
 }

@@ -25,8 +25,9 @@ type Scraper struct {
 }
 
 var (
-	longDatePattern  = regexp.MustCompile(`(?i)\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}\b`)
-	shortDatePattern = regexp.MustCompile(`\b\d{1,2}/\d{1,2}/\d{2,4}\b`)
+	monthDayYearPattern = regexp.MustCompile(`(?i)\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}\b`)
+	monthYearPattern    = regexp.MustCompile(`(?i)\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\b`)
+	shortDatePattern    = regexp.MustCompile(`\b\d{1,2}/\d{1,2}/\d{2,4}\b`)
 )
 
 func NewScraper() *Scraper {
@@ -76,8 +77,8 @@ func (s *Scraper) Sync(ctx context.Context) ([]models.Article, error) {
 	})
 
 	articles := make([]models.Article, 0, len(entries))
-	for idx, e := range entries {
-		content, publishedAt, source, err := s.fetchArticleContent(ctx, e.url, idx)
+	for _, e := range entries {
+		content, publishedAt, source, err := s.fetchArticleContent(ctx, e.url)
 		if err != nil {
 			continue
 		}
@@ -103,16 +104,29 @@ func (s *Scraper) Sync(ctx context.Context) ([]models.Article, error) {
 	return articles, nil
 }
 
-func (s *Scraper) fetchArticleContent(ctx context.Context, url string, sequence int) (string, time.Time, string, error) {
+func (s *Scraper) fetchArticleContent(ctx context.Context, url string) (string, time.Time, string, error) {
 	doc, err := s.fetchDoc(ctx, url)
 	if err != nil {
 		return "", time.Time{}, "", err
 	}
 	doc.Find("script, style, img, noscript").Remove()
 
-	body := strings.TrimSpace(doc.Find("body").Text())
-	publishedAt, source := inferPublishedDate(body, sequence)
-	return body, publishedAt, source, nil
+	var lineBuilder strings.Builder
+	doc.Find("body").Children().Each(func(_ int, s *goquery.Selection) {
+		text := strings.TrimSpace(s.Text())
+		if text == "" {
+			return
+		}
+		lineBuilder.WriteString(text)
+		lineBuilder.WriteString("\n")
+	})
+	lineText := strings.TrimSpace(lineBuilder.String())
+	if lineText == "" {
+		lineText = strings.TrimSpace(doc.Find("body").Text())
+	}
+
+	publishedAt, source := inferPublishedDate(doc, lineText)
+	return lineText, publishedAt, source, nil
 }
 
 func (s *Scraper) fetchDoc(ctx context.Context, url string) (*goquery.Document, error) {
@@ -210,23 +224,88 @@ func summarize(s string) string {
 	return strings.Join(words, " ") + "..."
 }
 
-func inferPublishedDate(content string, sequence int) (time.Time, string) {
-	if match := longDatePattern.FindString(content); match != "" {
-		if parsed, err := time.Parse("January 2, 2006", match); err == nil {
-			return parsed.UTC(), "extracted"
-		}
+func inferPublishedDate(doc *goquery.Document, content string) (time.Time, string) {
+	metaKeys := []string{
+		`meta[property="article:published_time"]`,
+		`meta[name="article:published_time"]`,
+		`meta[name="pubdate"]`,
+		`meta[name="publishdate"]`,
+		`meta[name="date"]`,
 	}
-
-	if match := shortDatePattern.FindString(content); match != "" {
-		layouts := []string{"1/2/2006", "1/2/06"}
-		for _, layout := range layouts {
-			if parsed, err := time.Parse(layout, match); err == nil {
-				return parsed.UTC(), "extracted"
+	for _, key := range metaKeys {
+		if val, ok := doc.Find(key).Attr("content"); ok {
+			if parsed, ok := parseDateCandidate(val); ok {
+				return parsed, "meta"
 			}
 		}
 	}
 
-	// Fallback inference: preserve the source listing order.
-	base := time.Date(2001, time.January, 1, 0, 0, 0, 0, time.UTC)
-	return base.AddDate(0, 0, sequence), "inferred"
+	lines := strings.Split(content, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if parsed, ok := parseDateCandidate(line); ok {
+			return parsed, "page_text"
+		}
+		if len(line) > 80 {
+			continue
+		}
+		if match := monthDayYearPattern.FindString(line); match != "" {
+			if parsed, ok := parseDateCandidate(match); ok {
+				return parsed, "page_text"
+			}
+		}
+		if match := monthYearPattern.FindString(line); match != "" {
+			if parsed, ok := parseDateCandidate(match); ok {
+				return parsed, "page_text"
+			}
+		}
+	}
+
+	return time.Time{}, "unknown"
+}
+
+func parseDateCandidate(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02",
+		"January 2, 2006",
+		"Jan 2, 2006",
+		"January 2006",
+		"Jan 2006",
+		"1/2/2006",
+		"1/2/06",
+	}
+	for _, layout := range layouts {
+		t, err := time.Parse(layout, raw)
+		if err == nil && t.Year() >= 1990 && t.Year() <= time.Now().UTC().Year()+1 {
+			if layout == "January 2006" || layout == "Jan 2006" {
+				t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+			}
+			return t.UTC(), true
+		}
+	}
+
+	if match := monthDayYearPattern.FindString(raw); match != "" {
+		if t, err := time.Parse("January 2, 2006", match); err == nil {
+			return t.UTC(), true
+		}
+	}
+	if match := monthYearPattern.FindString(raw); match != "" {
+		if t, err := time.Parse("January 2006", match); err == nil {
+			return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC), true
+		}
+	}
+	if match := shortDatePattern.FindString(raw); match != "" {
+		for _, layout := range []string{"1/2/2006", "1/2/06"} {
+			if t, err := time.Parse(layout, match); err == nil {
+				return t.UTC(), true
+			}
+		}
+	}
+
+	return time.Time{}, false
 }
